@@ -1,0 +1,126 @@
+# Nerve IDP — OPA Gatekeeper Constraints
+# Layer 2 enforcement: blocks pods at Kubernetes admission without valid compliance annotation.
+# Closes the bypass path of direct kubectl apply.
+#
+# Apply with: kubectl apply -f phase-2/policies/gatekeeper/
+
+---
+apiVersion: templates.gatekeeper.sh/v1
+kind: ConstraintTemplate
+metadata:
+  name: requirecomplianceannotation
+  annotations:
+    description: >
+      Every pod must have nerve.io/compliance-passed=true.
+      Pods without this annotation bypassed the Nerve IDP enforcer.
+spec:
+  crd:
+    spec:
+      names:
+        kind: RequireComplianceAnnotation
+      validation:
+        openAPIV3Schema:
+          type: object
+          properties:
+            minScore:
+              type: integer
+  targets:
+    - target: admission.k8s.gatekeeper.sh
+      rego: |
+        package requirecomplianceannotation
+        import future.keywords.if
+
+        violation[{"msg": msg}] if {
+          input.review.kind.kind == "Pod"
+          annotations := object.get(input.review.object.metadata, "annotations", {})
+          passed := object.get(annotations, "nerve.io/compliance-passed", "false")
+          passed != "true"
+          msg := sprintf(
+            "Pod '%v' missing nerve.io/compliance-passed=true. Deploy through Nerve IDP enforcer.",
+            [input.review.object.metadata.name]
+          )
+        }
+
+        violation[{"msg": msg}] if {
+          input.review.kind.kind == "Pod"
+          annotations := object.get(input.review.object.metadata, "annotations", {})
+          passed := object.get(annotations, "nerve.io/compliance-passed", "false")
+          passed == "true"
+          score_str := object.get(annotations, "nerve.io/compliance-score", "0")
+          score := to_number(score_str)
+          min_score := object.get(input.parameters, "minScore", 80)
+          score < min_score
+          msg := sprintf(
+            "Pod '%v' compliance score %v below minimum %v.",
+            [input.review.object.metadata.name, score, min_score]
+          )
+        }
+
+---
+apiVersion: constraints.gatekeeper.sh/v1beta1
+kind: RequireComplianceAnnotation
+metadata:
+  name: nerve-compliance-required
+spec:
+  enforcementAction: deny
+  match:
+    kinds:
+      - apiGroups: [""]
+        kinds: ["Pod"]
+    excludedNamespaces:
+      - kube-system
+      - kube-public
+      - kube-node-lease
+      - gatekeeper-system
+      - temporal
+      - vault
+      - monitoring
+  parameters:
+    minScore: 80
+
+---
+apiVersion: templates.gatekeeper.sh/v1
+kind: ConstraintTemplate
+metadata:
+  name: requirenetworkpolicy
+spec:
+  crd:
+    spec:
+      names:
+        kind: RequireNetworkPolicy
+  targets:
+    - target: admission.k8s.gatekeeper.sh
+      rego: |
+        package requirenetworkpolicy
+        import future.keywords.if
+
+        violation[{"msg": msg}] if {
+          input.review.kind.kind == "Pod"
+          namespace := input.review.object.metadata.namespace
+          not has_network_policy(namespace)
+          msg := sprintf(
+            "Namespace '%v' has no NetworkPolicy. Add one to the service Helm chart.",
+            [namespace]
+          )
+        }
+
+        # TODO Phase 5: wire Gatekeeper external data provider to check real NetworkPolicy inventory
+        has_network_policy(_) := true
+
+---
+apiVersion: constraints.gatekeeper.sh/v1beta1
+kind: RequireNetworkPolicy
+metadata:
+  name: nerve-network-policy-required
+spec:
+  enforcementAction: warn
+  match:
+    kinds:
+      - apiGroups: [""]
+        kinds: ["Pod"]
+    excludedNamespaces:
+      - kube-system
+      - kube-public
+      - temporal
+      - vault
+      - monitoring
