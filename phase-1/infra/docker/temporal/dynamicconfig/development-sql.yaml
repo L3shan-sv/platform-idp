@@ -1,0 +1,9 @@
+system.forceSearchAttributesCacheRefreshOnRead:
+  - value: true
+    constraints: {}
+limit.maxIDLength:
+  - value: 255
+    constraints: {}
+history.defaultWorkflowTaskTimeout:
+  - value: 10s
+    constraints: {}

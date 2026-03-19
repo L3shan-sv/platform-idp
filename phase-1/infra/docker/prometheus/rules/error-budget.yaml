@@ -1,0 +1,72 @@
+groups:
+  - name: nerve_error_budget_recording
+    interval: 15s
+    rules:
+      - record: nerve:service_error_rate:1h
+        expr: |
+          rate(nerve_http_requests_total{status=~"5.."}[1h])
+          / rate(nerve_http_requests_total[1h])
+      - record: nerve:service_error_rate:6h
+        expr: |
+          rate(nerve_http_requests_total{status=~"5.."}[6h])
+          / rate(nerve_http_requests_total[6h])
+      - record: nerve:service_error_rate:1d
+        expr: |
+          rate(nerve_http_requests_total{status=~"5.."}[1d])
+          / rate(nerve_http_requests_total[1d])
+      - record: nerve:service_error_rate:3d
+        expr: |
+          rate(nerve_http_requests_total{status=~"5.."}[3d])
+          / rate(nerve_http_requests_total[3d])
+      - record: nerve:burn_rate:1h
+        expr: nerve:service_error_rate:1h / (1 - nerve_slo_target)
+      - record: nerve:burn_rate:6h
+        expr: nerve:service_error_rate:6h / (1 - nerve_slo_target)
+      - record: nerve:burn_rate:1d
+        expr: nerve:service_error_rate:1d / (1 - nerve_slo_target)
+      - record: nerve:burn_rate:3d
+        expr: nerve:service_error_rate:3d / (1 - nerve_slo_target)
+
+  - name: nerve_error_budget_alerts
+    rules:
+      - alert: NerveBurnRateCritical
+        expr: nerve:burn_rate:1h > 14 AND nerve:burn_rate:6h > 14
+        for: 2m
+        labels:
+          severity: page
+          action: freeze_deploys
+        annotations:
+          summary: "Critical burn rate: {{ $labels.service }}"
+
+      - alert: NerveBurnRateHigh
+        expr: nerve:burn_rate:6h > 6
+        for: 5m
+        labels:
+          severity: page
+        annotations:
+          summary: "High burn rate: {{ $labels.service }}"
+
+      - alert: NerveBurnRateMedium
+        expr: nerve:burn_rate:1d > 3
+        for: 15m
+        labels:
+          severity: ticket
+        annotations:
+          summary: "Elevated burn rate: {{ $labels.service }}"
+
+      - alert: NerveBurnRateLow
+        expr: nerve:burn_rate:3d > 1
+        for: 30m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Budget warning: {{ $labels.service }}"
+
+      - alert: NerveBudgetExhausted
+        expr: nerve_error_budget_remaining < 0.001
+        for: 0m
+        labels:
+          severity: page
+          action: freeze_deploys
+        annotations:
+          summary: "Error budget EXHAUSTED: {{ $labels.service }}"
