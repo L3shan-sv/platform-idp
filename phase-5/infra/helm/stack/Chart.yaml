@@ -1,0 +1,60 @@
+apiVersion: v2
+name: nerve-idp-stack
+description: Nerve IDP — Full Platform Stack
+type: application
+version: 1.0.0
+appVersion: "1.0.0"
+
+dependencies:
+  - name: nerve-gateway
+    version: "1.0.0"
+    repository: "file://../gateway"
+    alias: gateway
+  - name: nerve-catalog
+    version: "1.0.0"
+    repository: "file://../catalog"
+    alias: catalog
+  - name: nerve-enforcer
+    version: "1.0.0"
+    repository: "file://../enforcer"
+    alias: enforcer
+  - name: nerve-pipeline
+    version: "1.0.0"
+    repository: "file://../pipeline"
+    alias: pipeline
+  - name: nerve-blast-radius
+    version: "1.0.0"
+    repository: "file://../blast-radius"
+    alias: blastRadius
+  - name: nerve-error-budget
+    version: "1.0.0"
+    repository: "file://../error-budget"
+    alias: errorBudget
+  - name: nerve-cost-intelligence
+    version: "1.0.0"
+    repository: "file://../cost-intelligence"
+    alias: costIntelligence
+  - name: nerve-maturity
+    version: "1.0.0"
+    repository: "file://../maturity"
+    alias: maturity
+  - name: nerve-security
+    version: "1.0.0"
+    repository: "file://../security"
+    alias: security
+  - name: nerve-ai-copilot
+    version: "1.0.0"
+    repository: "file://../ai-copilot"
+    alias: aiCopilot
+  - name: nerve-docs
+    version: "1.0.0"
+    repository: "file://../docs"
+    alias: docs
+  - name: nerve-chaos
+    version: "1.0.0"
+    repository: "file://../chaos"
+    alias: chaos
+  - name: nerve-fleet
+    version: "1.0.0"
+    repository: "file://../fleet"
+    alias: fleet

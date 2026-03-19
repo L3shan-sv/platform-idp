@@ -1,0 +1,104 @@
+---
+# Nerve IDP — ArgoCD Project
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: nerve-idp
+  namespace: argocd
+spec:
+  description: Nerve Internal Developer Platform
+  sourceRepos:
+    - "https://github.com/your-org/nerve-idp"
+  destinations:
+    - namespace: nerve-dev
+      server: https://kubernetes.default.svc
+    - namespace: nerve-staging
+      server: https://kubernetes.default.svc
+    - namespace: nerve-prod
+      server: https://kubernetes.default.svc
+  clusterResourceWhitelist:
+    - group: ""
+      kind: Namespace
+  namespaceResourceWhitelist:
+    - group: "*"
+      kind: "*"
+  roles:
+    - name: developer
+      description: Developers can view all apps
+      policies:
+        - p, proj:nerve-idp:developer, applications, get, nerve-idp/*, allow
+    - name: sre
+      description: SREs can sync dev and staging
+      policies:
+        - p, proj:nerve-idp:sre, applications, *, nerve-idp/*-dev, allow
+        - p, proj:nerve-idp:sre, applications, *, nerve-idp/*-staging, allow
+        - p, proj:nerve-idp:sre, applications, get, nerve-idp/*-prod, allow
+    - name: platform-engineer
+      description: Platform engineers can sync all environments
+      policies:
+        - p, proj:nerve-idp:platform-engineer, applications, *, nerve-idp/*, allow
+
+---
+# Nerve IDP — ApplicationSet (generates one App per environment)
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: nerve-idp
+  namespace: argocd
+spec:
+  generators:
+    - list:
+        elements:
+          - env: dev
+            namespace: nerve-dev
+            syncPolicy: automated     # Auto-sync on every push to main
+            valuesFile: values.dev.yaml
+          - env: staging
+            namespace: nerve-staging
+            syncPolicy: manual        # Manual sync approval required
+            valuesFile: values.staging.yaml
+          - env: prod
+            namespace: nerve-prod
+            syncPolicy: manual        # Manual sync approval required
+            valuesFile: values.prod.yaml
+
+  template:
+    metadata:
+      name: "nerve-idp-{{env}}"
+      labels:
+        environment: "{{env}}"
+    spec:
+      project: nerve-idp
+      source:
+        repoURL: https://github.com/your-org/nerve-idp
+        targetRevision: main
+        path: phase-5/infra/helm/stack
+        helm:
+          valueFiles:
+            - values.yaml
+            - "../../gateway/{{valuesFile}}"
+      destination:
+        server: https://kubernetes.default.svc
+        namespace: "{{namespace}}"
+      syncPolicy:
+        {{- if eq .syncPolicy "automated" }}
+        automated:
+          prune: true
+          selfHeal: true
+        {{- end }}
+        syncOptions:
+          - CreateNamespace=true
+          - PrunePropagationPolicy=foreground
+          - PruneLast=true
+        retry:
+          limit: 3
+          backoff:
+            duration: 5s
+            factor: 2
+            maxDuration: 3m
+      revisionHistoryLimit: 5
+      info:
+        - name: environment
+          value: "{{env}}"
+        - name: docs
+          value: https://nerve.internal/docs

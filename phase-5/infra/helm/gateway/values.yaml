@@ -1,0 +1,89 @@
+replicaCount: 2
+
+image:
+  repository: ghcr.io/your-org/nerve-idp/gateway
+  pullPolicy: IfNotPresent
+  tag: "latest"
+
+service:
+  type: ClusterIP
+  port: 8000
+
+resources:
+  requests:
+    cpu: 250m
+    memory: 256Mi
+  limits:
+    cpu: 1000m
+    memory: 512Mi
+
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 70
+  targetMemoryUtilizationPercentage: 80
+
+# Raise ulimit for high connection counts
+# This is one of the 4 tuning changes for 2,000 concurrent users
+podSecurityContext:
+  sysctls:
+    - name: net.core.somaxconn
+      value: "65535"
+
+livenessProbe:
+  httpGet:
+    path: /health
+    port: 8000
+  initialDelaySeconds: 10
+  periodSeconds: 10
+
+readinessProbe:
+  httpGet:
+    path: /health/ready
+    port: 8000
+  initialDelaySeconds: 15
+  periodSeconds: 5
+  failureThreshold: 6
+
+env:
+  ENVIRONMENT: production
+  LOG_LEVEL: INFO
+
+envFromSecret:
+  - name: nerve-secrets
+    keys:
+      - JWT_SECRET_KEY
+      - NERVE_INTERNAL_TOKEN
+      - ANTHROPIC_API_KEY
+      - GITHUB_TOKEN
+      - GITHUB_ORG
+
+serviceAccount:
+  create: true
+  name: nerve-gateway
+
+networkPolicy:
+  enabled: true
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ingress-nginx
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: nerve-dev
+
+ingress:
+  enabled: true
+  className: nginx
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "300"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "300"
+  hosts:
+    - host: nerve.internal
+      paths:
+        - path: /
+          pathType: Prefix

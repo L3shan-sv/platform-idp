@@ -1,0 +1,28 @@
+replicaCount: 3
+autoscaling:
+  enabled: true
+  minReplicas: 3
+  maxReplicas: 10
+resources:
+  requests:
+    cpu: 500m
+    memory: 512Mi
+  limits:
+    cpu: 2000m
+    memory: 1Gi
+env:
+  ENVIRONMENT: production
+  LOG_LEVEL: WARNING
+ingress:
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+  hosts:
+    - host: nerve.internal
+      paths:
+        - path: /
+          pathType: Prefix
+  tls:
+    - secretName: nerve-tls
+      hosts:
+        - nerve.internal
