@@ -3,47 +3,16 @@ version: "3.9"
 # ═══════════════════════════════════════════════════════════════
 # Nerve IDP — Master Docker Compose
 #
-# This file grows with each phase.
-# Phase 1: Infrastructure only (postgres, redis, neo4j, vault,
-#           temporal, opa, otel, prometheus, grafana, jaeger)
-# Phase 2: + catalog, enforcer, pipeline, gateway, workers
-# Phase 3: + blast-radius, error-budget, cost-intelligence,
-#            maturity, security
-# Phase 4: + ai-copilot, docs, chaos, fleet
-# Phase 5: production hardening configs
+# Phase 1: Infrastructure (all running)
+# Phase 2: + gateway, catalog, enforcer, pipeline, workers (active)
+# Phase 3: + blast-radius, error-budget, cost-intelligence, maturity, security (commented)
+# Phase 4: + ai-copilot, docs, chaos, fleet (commented)
 #
 # Usage:
-#   docker compose up -d              # start everything
+#   docker compose up -d
 #   docker compose up -d postgres redis neo4j vault
 #   docker compose logs -f catalog
 #   docker compose down -v
-#
-# Port map:
-#   5432  PostgreSQL (migrations only — never app traffic)
-#   6432  PgBouncer  (all app DB connections go here)
-#   6379  Redis primary
-#   26379 Redis Sentinel
-#   7474  Neo4j Browser UI
-#   7687  Neo4j Bolt
-#   8200  Vault UI
-#   7233  Temporal gRPC
-#   8088  Temporal UI
-#   8181  OPA
-#   4317  OTel Collector (gRPC)
-#   4318  OTel Collector (HTTP)
-#   16686 Jaeger UI
-#   9090  Prometheus
-#   3000  Grafana
-#   9093  Alertmanager
-#   8000  Gateway         (Phase 2+)
-#   8001  Catalog         (Phase 2+)
-#   8002  Enforcer        (Phase 2+)
-#   8003  Pipeline        (Phase 2+)
-#   8004  Blast Radius    (Phase 3+)
-#   8005  Error Budget    (Phase 3+)
-#   8006  Cost Intel      (Phase 3+)
-#   8007  Maturity        (Phase 3+)
-#   8008  Security        (Phase 3+)
 # ═══════════════════════════════════════════════════════════════
 
 networks:
@@ -65,12 +34,9 @@ x-logging: &default-logging
     max-size: "10m"
     max-file: "3"
 
-# ── Shared environment blocks ─────────────────────────────────
-# Referenced by all app services via <<: *app-env
 x-db-env: &db-env
   DATABASE_URL: postgresql+asyncpg://nerve_app:nerve_app_secret@pgbouncer:6432/nerve
   DATABASE_URL_SYNC: postgresql+psycopg2://nerve_app:nerve_app_secret@pgbouncer:6432/nerve
-  # Alembic migrations use this — bypasses PgBouncer (DDL needs direct connection)
   DATABASE_URL_MIGRATIONS: postgresql+psycopg2://nerve:nerve_dev_secret@postgres:5432/nerve
 
 x-redis-env: &redis-env
@@ -104,7 +70,6 @@ x-app-env: &app-env
   AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
   AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
   TERRAFORM_CLOUD_TOKEN: ${TERRAFORM_CLOUD_TOKEN:-}
-  # Service-to-service URLs (internal Docker network)
   CATALOG_SERVICE_URL: http://catalog:8000
   ENFORCER_SERVICE_URL: http://enforcer:8000
   PIPELINE_SERVICE_URL: http://pipeline:8000
@@ -129,14 +94,8 @@ services:
       POSTGRES_USER: nerve
       POSTGRES_PASSWORD: nerve_dev_secret
     command: >
-      postgres
-        -c max_connections=200
-        -c shared_buffers=256MB
-        -c effective_cache_size=768MB
-        -c maintenance_work_mem=64MB
-        -c checkpoint_completion_target=0.9
-        -c wal_buffers=16MB
-        -c work_mem=4MB
+      postgres -c max_connections=200 -c shared_buffers=256MB
+        -c effective_cache_size=768MB -c work_mem=4MB
         -c log_min_duration_statement=1000
     ports:
       - "5432:5432"
@@ -173,7 +132,6 @@ services:
       PGBOUNCER_MIN_POOL_SIZE: "5"
       PGBOUNCER_RESERVE_POOL_SIZE: "5"
       PGBOUNCER_LOG_CONNECTIONS: "0"
-      PGBOUNCER_LOG_DISCONNECTIONS: "0"
     ports:
       - "6432:6432"
     healthcheck:
@@ -190,12 +148,8 @@ services:
     container_name: nerve-redis
     restart: unless-stopped
     command: >
-      redis-server
-        --requirepass nerve_redis_secret
-        --maxmemory 512mb
-        --maxmemory-policy allkeys-lru
-        --save 900 1
-        --save 300 10
+      redis-server --requirepass nerve_redis_secret --maxmemory 512mb
+        --maxmemory-policy allkeys-lru --save 900 1 --save 300 10
     ports:
       - "6379:6379"
     volumes:
@@ -217,11 +171,8 @@ services:
       redis:
         condition: service_healthy
     command: >
-      redis-server
-        --requirepass nerve_redis_secret
-        --masterauth nerve_redis_secret
-        --replicaof redis 6379
-        --replica-read-only yes
+      redis-server --requirepass nerve_redis_secret --masterauth nerve_redis_secret
+        --replicaof redis 6379 --replica-read-only yes
     networks:
       - nerve
     logging: *default-logging
@@ -234,11 +185,8 @@ services:
       redis:
         condition: service_healthy
     command: >
-      redis-server
-        --requirepass nerve_redis_secret
-        --masterauth nerve_redis_secret
-        --replicaof redis 6379
-        --replica-read-only yes
+      redis-server --requirepass nerve_redis_secret --masterauth nerve_redis_secret
+        --replicaof redis 6379 --replica-read-only yes
     networks:
       - nerve
     logging: *default-logging
@@ -256,7 +204,6 @@ services:
         echo 'sentinel auth-pass nerve-master nerve_redis_secret' >> /tmp/sentinel.conf &&
         echo 'sentinel down-after-milliseconds nerve-master 5000' >> /tmp/sentinel.conf &&
         echo 'sentinel failover-timeout nerve-master 60000' >> /tmp/sentinel.conf &&
-        echo 'sentinel parallel-syncs nerve-master 1' >> /tmp/sentinel.conf &&
         redis-sentinel /tmp/sentinel.conf
       "
     ports:
@@ -272,7 +219,6 @@ services:
     environment:
       NEO4J_AUTH: neo4j/nerve_neo4j_secret
       NEO4J_PLUGINS: '["apoc"]'
-      NEO4J_dbms_security_procedures_unrestricted: apoc.*
       NEO4J_server_memory_heap_initial__size: 512m
       NEO4J_server_memory_heap_max__size: 1G
       NEO4J_server_memory_pagecache__size: 512m
@@ -352,7 +298,6 @@ services:
       - temporal
     environment:
       TEMPORAL_ADDRESS: temporal:7233
-      TEMPORAL_CORS_ORIGINS: http://localhost:3000,http://localhost:5173
     ports:
       - "8088:8080"
     networks:
@@ -368,7 +313,6 @@ services:
       - "--server"
       - "--addr=0.0.0.0:8181"
       - "--log-level=info"
-      - "--log-format=json"
       - "--watch"
       - "/policies"
     volumes:
@@ -466,150 +410,425 @@ services:
 
   # ═══════════════════════════════════════════
   # PHASE 2 — APPLICATION SERVICES
-  # Uncomment when phase-2/ directory is present
   # ═══════════════════════════════════════════
 
-  # gateway:
-  #   build:
-  #     context: ./phase-2/backend/gateway
-  #     dockerfile: Dockerfile
-  #   container_name: nerve-gateway
-  #   restart: unless-stopped
-  #   depends_on:
-  #     pgbouncer:
-  #       condition: service_healthy
-  #     redis:
-  #       condition: service_healthy
-  #     opa:
-  #       condition: service_healthy
-  #     catalog:
-  #       condition: service_healthy
-  #     enforcer:
-  #       condition: service_healthy
-  #   environment:
-  #     <<: *app-env
-  #   ports:
-  #     - "8000:8000"
-  #   networks:
-  #     - nerve
+  gateway:
+    build:
+      context: ./phase-2/backend/gateway
+      dockerfile: Dockerfile
+    container_name: nerve-gateway
+    restart: unless-stopped
+    depends_on:
+      pgbouncer:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      opa:
+        condition: service_healthy
+      catalog:
+        condition: service_healthy
+      enforcer:
+        condition: service_healthy
+    environment:
+      <<: *app-env
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8000/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - nerve
+    logging: *default-logging
 
-  # catalog:
-  #   build:
-  #     context: ./phase-2/backend/services/catalog
-  #     dockerfile: Dockerfile
-  #   container_name: nerve-catalog
-  #   restart: unless-stopped
-  #   depends_on:
-  #     pgbouncer:
-  #       condition: service_healthy
-  #     redis:
-  #       condition: service_healthy
-  #     neo4j:
-  #       condition: service_healthy
-  #   environment:
-  #     <<: *app-env
-  #   ports:
-  #     - "8001:8000"
-  #   networks:
-  #     - nerve
+  catalog:
+    build:
+      context: ./phase-2/backend/services/catalog
+      dockerfile: Dockerfile
+    container_name: nerve-catalog
+    restart: unless-stopped
+    depends_on:
+      pgbouncer:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      neo4j:
+        condition: service_healthy
+    environment:
+      <<: *app-env
+    ports:
+      - "8001:8000"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8000/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - nerve
+    logging: *default-logging
 
-  # enforcer:
-  #   build:
-  #     context: ./phase-2/backend/services/enforcer
-  #     dockerfile: Dockerfile
-  #   container_name: nerve-enforcer
-  #   restart: unless-stopped
-  #   depends_on:
-  #     opa:
-  #       condition: service_healthy
-  #     pgbouncer:
-  #       condition: service_healthy
-  #   environment:
-  #     <<: *app-env
-  #   ports:
-  #     - "8002:8000"
-  #   networks:
-  #     - nerve
+  enforcer:
+    build:
+      context: ./phase-2/backend/services/enforcer
+      dockerfile: Dockerfile
+    container_name: nerve-enforcer
+    restart: unless-stopped
+    depends_on:
+      opa:
+        condition: service_healthy
+      pgbouncer:
+        condition: service_healthy
+      catalog:
+        condition: service_healthy
+    environment:
+      <<: *app-env
+    ports:
+      - "8002:8000"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8000/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+      start_period: 30s
+    networks:
+      - nerve
+    logging: *default-logging
 
-  # pipeline:
-  #   build:
-  #     context: ./phase-2/backend/services/pipeline
-  #     dockerfile: Dockerfile
-  #   container_name: nerve-pipeline
-  #   restart: unless-stopped
-  #   depends_on:
-  #     pgbouncer:
-  #       condition: service_healthy
-  #     redis:
-  #       condition: service_healthy
-  #   environment:
-  #     <<: *app-env
-  #   ports:
-  #     - "8003:8000"
-  #   networks:
-  #     - nerve
+  pipeline:
+    build:
+      context: ./phase-2/backend/services/pipeline
+      dockerfile: Dockerfile
+    container_name: nerve-pipeline
+    restart: unless-stopped
+    depends_on:
+      pgbouncer:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      <<: *app-env
+    ports:
+      - "8003:8000"
+    networks:
+      - nerve
+    logging: *default-logging
+
+  worker-dora:
+    build:
+      context: ./phase-2/backend/services/pipeline
+      dockerfile: Dockerfile
+    container_name: nerve-worker-dora
+    restart: unless-stopped
+    depends_on:
+      redis:
+        condition: service_healthy
+      pgbouncer:
+        condition: service_healthy
+    command: celery -A app.workers.dora.celery_app worker --loglevel=info --queues=dora --concurrency=2
+    environment:
+      <<: *app-env
+    networks:
+      - nerve
+    logging: *default-logging
+
+  temporal-worker-scaffold:
+    build:
+      context: ./phase-2/workflows/temporal
+      dockerfile: Dockerfile
+    container_name: nerve-temporal-worker-scaffold
+    restart: unless-stopped
+    depends_on:
+      temporal:
+        condition: service_healthy
+    command: python worker.py --queue nerve-scaffold
+    environment:
+      <<: *app-env
+    networks:
+      - nerve
+    logging: *default-logging
+
+  temporal-worker-iac:
+    build:
+      context: ./phase-2/workflows/temporal
+      dockerfile: Dockerfile
+    container_name: nerve-temporal-worker-iac
+    restart: unless-stopped
+    depends_on:
+      temporal:
+        condition: service_healthy
+    command: python worker.py --queue nerve-iac
+    environment:
+      <<: *app-env
+    networks:
+      - nerve
+    logging: *default-logging
 
   # ═══════════════════════════════════════════
   # PHASE 3 — DIFFERENTIATOR SERVICES
-  # Uncomment when phase-3/ directory is present
   # ═══════════════════════════════════════════
 
-  # blast-radius:
-  #   build:
-  #     context: ./phase-3/backend/services/blast-radius
-  #     dockerfile: Dockerfile
-  #   container_name: nerve-blast-radius
-  #   ports:
-  #     - "8004:8000"
-  #   environment:
-  #     <<: *app-env
-  #   networks:
-  #     - nerve
+  blast-radius:
+    build:
+      context: ./phase-3/backend/services/blast-radius
+      dockerfile: Dockerfile
+    container_name: nerve-blast-radius
+    restart: unless-stopped
+    depends_on:
+      neo4j:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      <<: *app-env
+    ports:
+      - "8004:8000"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8000/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - nerve
+    logging: *default-logging
 
-  # error-budget:
-  #   build:
-  #     context: ./phase-3/backend/services/error-budget
-  #     dockerfile: Dockerfile
-  #   container_name: nerve-error-budget
-  #   ports:
-  #     - "8005:8000"
-  #   environment:
-  #     <<: *app-env
-  #   networks:
-  #     - nerve
+  error-budget:
+    build:
+      context: ./phase-3/backend/services/error-budget
+      dockerfile: Dockerfile
+    container_name: nerve-error-budget
+    restart: unless-stopped
+    depends_on:
+      pgbouncer:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      <<: *app-env
+    ports:
+      - "8005:8000"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8000/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - nerve
+    logging: *default-logging
 
-  # cost-intelligence:
-  #   build:
-  #     context: ./phase-3/backend/services/cost-intelligence
-  #     dockerfile: Dockerfile
-  #   container_name: nerve-cost-intelligence
-  #   ports:
-  #     - "8006:8000"
-  #   environment:
-  #     <<: *app-env
-  #   networks:
-  #     - nerve
+  cost-intelligence:
+    build:
+      context: ./phase-3/backend/services/cost-intelligence
+      dockerfile: Dockerfile
+    container_name: nerve-cost-intelligence
+    restart: unless-stopped
+    depends_on:
+      pgbouncer:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      <<: *app-env
+    ports:
+      - "8006:8000"
+    networks:
+      - nerve
+    logging: *default-logging
 
-  # maturity:
-  #   build:
-  #     context: ./phase-3/backend/services/maturity
-  #     dockerfile: Dockerfile
-  #   container_name: nerve-maturity
-  #   ports:
-  #     - "8007:8000"
-  #   environment:
-  #     <<: *app-env
-  #   networks:
-  #     - nerve
+  maturity:
+    build:
+      context: ./phase-3/backend/services/maturity
+      dockerfile: Dockerfile
+    container_name: nerve-maturity
+    restart: unless-stopped
+    depends_on:
+      pgbouncer:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      <<: *app-env
+    ports:
+      - "8007:8000"
+    networks:
+      - nerve
+    logging: *default-logging
 
-  # security:
-  #   build:
-  #     context: ./phase-3/backend/services/security
-  #     dockerfile: Dockerfile
-  #   container_name: nerve-security
-  #   ports:
-  #     - "8008:8000"
-  #   environment:
-  #     <<: *app-env
-  #   networks:
-  #     - nerve
+  security:
+    build:
+      context: ./phase-3/backend/services/security
+      dockerfile: Dockerfile
+    container_name: nerve-security
+    restart: unless-stopped
+    depends_on:
+      pgbouncer:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      <<: *app-env
+    ports:
+      - "8008:8000"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8000/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - nerve
+    logging: *default-logging
+
+  worker-cost:
+    build:
+      context: ./phase-3/backend/services/cost-intelligence
+      dockerfile: Dockerfile
+    container_name: nerve-worker-cost
+    restart: unless-stopped
+    depends_on:
+      redis:
+        condition: service_healthy
+      pgbouncer:
+        condition: service_healthy
+    command: celery -A app.workers.cost.celery_app worker --beat --loglevel=info --queues=cost --concurrency=1
+    environment:
+      <<: *app-env
+    networks:
+      - nerve
+    logging: *default-logging
+
+  worker-maturity:
+    build:
+      context: ./phase-3/backend/services/maturity
+      dockerfile: Dockerfile
+    container_name: nerve-worker-maturity
+    restart: unless-stopped
+    depends_on:
+      redis:
+        condition: service_healthy
+      pgbouncer:
+        condition: service_healthy
+    command: celery -A app.main.celery_app worker --loglevel=info --queues=maturity --concurrency=2
+    environment:
+      <<: *app-env
+    networks:
+      - nerve
+    logging: *default-logging
+
+  # ═══════════════════════════════════════════
+  # PHASE 4 — WOW LAYER
+  # ═══════════════════════════════════════════
+
+  ai-copilot:
+    build:
+      context: ./phase-4/backend/services/ai-copilot
+      dockerfile: Dockerfile
+    container_name: nerve-ai-copilot
+    restart: unless-stopped
+    depends_on:
+      pgbouncer:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      <<: *app-env
+    ports:
+      - "8009:8000"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8000/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - nerve
+    logging: *default-logging
+
+  docs-service:
+    build:
+      context: ./phase-4/backend/services/docs
+      dockerfile: Dockerfile
+    container_name: nerve-docs
+    restart: unless-stopped
+    depends_on:
+      pgbouncer:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      <<: *app-env
+    ports:
+      - "8010:8000"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8000/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - nerve
+    logging: *default-logging
+
+  chaos:
+    build:
+      context: ./phase-4/backend/services/chaos
+      dockerfile: Dockerfile
+    container_name: nerve-chaos
+    restart: unless-stopped
+    depends_on:
+      pgbouncer:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      temporal:
+        condition: service_healthy
+    environment:
+      <<: *app-env
+    ports:
+      - "8011:8000"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8000/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - nerve
+    logging: *default-logging
+
+  fleet:
+    build:
+      context: ./phase-4/backend/services/fleet
+      dockerfile: Dockerfile
+    container_name: nerve-fleet
+    restart: unless-stopped
+    depends_on:
+      pgbouncer:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      <<: *app-env
+    ports:
+      - "8012:8000"
+    networks:
+      - nerve
+    logging: *default-logging
+
+  temporal-worker-runbooks:
+    build:
+      context: ./phase-4/workflows/temporal
+      dockerfile: Dockerfile
+    container_name: nerve-temporal-worker-runbooks
+    restart: unless-stopped
+    depends_on:
+      temporal:
+        condition: service_healthy
+    command: python worker.py --queue nerve-runbooks
+    environment:
+      <<: *app-env
+    networks:
+      - nerve
+    logging: *default-logging
+
+  # ═══════════════════════════════════════════
+  # PHASE 5 — PRODUCTION HARDENING
+  # Helm + ArgoCD handle production deployment
+  # No additional compose services for Phase 5
+  # ═══════════════════════════════════════════
