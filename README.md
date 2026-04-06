@@ -8,11 +8,11 @@
 
 ## What this is
 
-Nerve IDP is a FAANG-grade platform engineering control plane built for SRE and Platform Engineering teams. It removes the three biggest blockers to engineering velocity:
+Nerve IDP is a FAANG-grade platform engineering control plane for SRE and Platform Engineering teams. It removes three blockers to engineering velocity:
 
-1. **Policy enforcement** — Golden path enforcer gates every deploy with OPA. 6 checks. 0–100 compliance score. Hard block below 80.
+1. **Policy enforcement** — Golden path enforcer gates every deploy with OPA. 6 checks. 0–100 score. Hard blocked below 80. Two enforcement layers: API + Kubernetes admission.
 2. **Self-service infrastructure** — Scaffold a production-ready service in under 4 minutes. IaC changes via form, not tickets.
-3. **Platform-wide observability** — Google SRE error budget model, DORA metrics, AI-powered incident co-pilot.
+3. **Platform-wide observability** — Google SRE error budget model, DORA metrics, AI-powered incident co-pilot, live topology streaming.
 
 ---
 
@@ -20,62 +20,68 @@ Nerve IDP is a FAANG-grade platform engineering control plane built for SRE and 
 
 ```
 nerve-idp/
-├── docker-compose.yaml       ← Single compose file for the entire stack
+├── docker-compose.yaml       ← Single compose file — all phases
 ├── README.md                 ← This file
 ├── DOCUMENTATION.md          ← Full technical documentation
-├── .env.example              ← Environment variable template
-│
-├── phase-1/                  ← Foundation: gateway, infra, OpenAPI spec
-│   ├── README.md
-│   ├── backend/gateway/
-│   ├── infra/docker/
-│   └── docs/
-│
-├── phase-2/                  ← Core platform: catalog, enforcer, DORA, scaffold
-│   ├── README.md
-│   └── backend/services/
-│
-├── phase-3/                  ← Differentiators: blast radius, error budget, cost, maturity
-│   ├── README.md
-│   └── backend/services/
-│
-├── phase-4/                  ← Wow layer: AI co-pilot, TechDocs, chaos, fleet
-│   ├── README.md
-│   └── backend/services/
-│
-└── phase-5/                  ← Production hardening: Helm, ArgoCD, load tests
-    ├── README.md
-    └── infra/
+├── .env.example
+├── phase-1/                  ← Foundation: gateway, infra, OpenAPI contract ✅
+├── phase-2/                  ← Core platform: catalog, enforcer, DORA, scaffold ✅
+├── phase-3/                  ← Differentiators: blast radius, error budget, cost, maturity ✅
+├── phase-4/                  ← Wow layer: AI co-pilot, TechDocs, chaos, fleet, GraphQL ✅
+└── phase-5/                  ← Production hardening: Helm, ArgoCD, k6, capacity report ✅
 ```
 
 ---
 
-## Quick start
+## Quick start (local dev)
 
 ```bash
-# 1. Copy environment template
 cp .env.example .env
+# Required: GITHUB_TOKEN, GITHUB_ORG
+# For AI co-pilot: ANTHROPIC_API_KEY
 
-# 2. Start the full stack
 docker compose up -d
-
-# 3. Verify everything is healthy
 docker compose ps
 curl http://localhost:8000/health/ready
+open http://localhost:8000/docs
 ```
 
-**Service URLs once running:**
+## Deploy to Kubernetes
 
-| Service | URL |
+```bash
+# ArgoCD manages the full lifecycle
+kubectl apply -f phase-5/infra/argocd/project.yaml
+kubectl apply -f phase-5/infra/argocd/applicationset.yaml
+# ArgoCD auto-syncs dev. Staging and prod require manual approval.
+```
+
+---
+
+## Service ports
+
+| Port | Service |
 |---|---|
-| API Gateway | http://localhost:8000 |
-| API Docs (Swagger) | http://localhost:8000/docs |
-| Temporal UI | http://localhost:8088 |
-| Grafana | http://localhost:3000 |
-| Jaeger | http://localhost:16686 |
-| Prometheus | http://localhost:9090 |
-| Neo4j Browser | http://localhost:7474 |
-| Vault | http://localhost:8200 |
+| 8000 | API Gateway (all traffic enters here) |
+| 8001 | Catalog |
+| 8002 | Golden Path Enforcer |
+| 8003 | Pipeline + DORA |
+| 8004 | Blast Radius |
+| 8005 | Error Budget |
+| 8006 | Cost Intelligence |
+| 8007 | Maturity Scoring |
+| 8008 | Security Posture |
+| 8009 | AI Co-pilot |
+| 8010 | TechDocs |
+| 8011 | Chaos Engineering |
+| 8012 | Fleet Operations |
+| 8000/docs | Swagger UI |
+| 8000/graphql | GraphQL |
+| 8088 | Temporal UI |
+| 3000 | Grafana (admin / nerve_grafana_secret) |
+| 16686 | Jaeger |
+| 9090 | Prometheus |
+| 7474 | Neo4j Browser |
+| 8200 | Vault |
 
 ---
 
@@ -83,11 +89,22 @@ curl http://localhost:8000/health/ready
 
 | Phase | Scope | Status |
 |---|---|---|
-| **Phase 1** | Foundation — gateway, infra stack, OpenAPI contract | ✅ |
-| **Phase 2** | Core platform — catalog, enforcer, DORA, scaffold | ⏳ |
-| **Phase 3** | Differentiators — blast radius, error budget, cost, maturity | ⏳ |
-| **Phase 4** | Wow layer — AI co-pilot, TechDocs, chaos, fleet ops | ⏳ |
-| **Phase 5** | Production hardening — Helm, ArgoCD, load tests | ⏳ |
+| **Phase 1** | Foundation — gateway, infra, OpenAPI contract | ✅ |
+| **Phase 2** | Core platform — catalog, enforcer, DORA, scaffold, IaC | ✅ |
+| **Phase 3** | Differentiators — blast radius, error budget, cost, maturity, security | ✅ |
+| **Phase 4** | Wow layer — AI co-pilot, TechDocs, chaos, fleet ops, GraphQL | ✅ |
+| **Phase 5** | Production hardening — Helm, ArgoCD, k6, capacity validation | ✅ |
+
+---
+
+## Capacity
+
+| Configuration | Concurrent users | Services |
+|---|---|---|
+| Default (out of box) | 150 | 300 |
+| Tuned (4 config changes) | 2,000 | 2,000 |
+
+See `phase-5/tests/k6/capacity_report.md` for full validated benchmarks.
 
 ---
 
@@ -98,11 +115,13 @@ curl http://localhost:8000/health/ready
 | Frontend | React 18, TypeScript, Vite, Tailwind CSS v3 |
 | Backend | FastAPI (Python 3.12), Pydantic v2, SQLAlchemy 2.0 |
 | Database | PostgreSQL 15 + PgBouncer + pgvector |
-| Cache / Events | Redis 7 + Sentinel HA + Redis Streams |
+| Cache/Events | Redis 7 + Sentinel HA + Redis Streams |
 | Graph | Neo4j 5 |
-| Workflow Engine | Temporal.io + Celery |
+| Workflows | Temporal.io + Celery |
 | Secrets | HashiCorp Vault |
-| Observability | Prometheus + Grafana + Loki + Jaeger + OTel |
-| Security | Trivy + Semgrep + Syft + OPA + OPA Gatekeeper |
+| Observability | Prometheus + Grafana + Jaeger + OTel Collector |
+| Policy | OPA (API layer) + OPA Gatekeeper (Kubernetes admission) |
+| Security | Trivy + Semgrep + Syft |
 | AI | Anthropic Claude API + pgvector |
 | GitOps | ArgoCD + Helm 3 |
+| Load testing | k6 |
